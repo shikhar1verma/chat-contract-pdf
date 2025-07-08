@@ -8,7 +8,7 @@ Backend and database run via Docker Compose:
 
 ```bash
 cd backend
-docker-compose up --build
+docker compose up --build
 ```
 
 Frontend runs with Next.js:

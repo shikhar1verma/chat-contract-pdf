@@ -13,6 +13,8 @@ export default function FileUploader() {
       method: 'POST',
       body: formData,
     });
+    const data = await res.json();
+    localStorage.setItem('upload_id', data.upload_id);
     setUploading(false);
   };
 

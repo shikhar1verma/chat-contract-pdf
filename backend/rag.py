@@ -2,12 +2,12 @@
 
 import logging
 import os
-from typing import List
+from typing import List, Optional
 
-import psycopg2
+import psycopg
+from psycopg import Connection
 from dotenv import load_dotenv
-from langchain.embeddings import GoogleGenerativeAIEmbeddings
-from langchain.llms import GoogleGenerativeAI
+from langchain_google_genai import GoogleGenerativeAIEmbeddings, GoogleGenerativeAI
 from pgvector.psycopg import register_vector
 
 # Load environment variables
@@ -18,16 +18,15 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(message)s")
 
-
-def _get_connection() -> psycopg2.extensions.connection:
+def _get_connection() -> Connection:
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL is not set")
-    conn = psycopg2.connect(DATABASE_URL)
+    conn = psycopg.connect(DATABASE_URL)
     register_vector(conn)
     return conn
 
 
-def retrieve(question: str, top_k: int = 5) -> List[str]:
+def retrieve(question: str, upload_id: str, top_k: int = 5) -> List[str]:
     """Retrieve top-k relevant text chunks from the database."""
     embeddings = GoogleGenerativeAIEmbeddings(google_api_key=GEMINI_API_KEY)
     query_vec = embeddings.embed_query(question)
@@ -38,11 +37,13 @@ def retrieve(question: str, top_k: int = 5) -> List[str]:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT chunk_text FROM documents
+                    SELECT chunk_text
+                    FROM documents
+                    WHERE upload_id = %s
                     ORDER BY chunk_embedding <-> %s
                     LIMIT %s
                     """,
-                    (query_vec, top_k),
+                    (upload_id, query_vec, top_k),
                 )
                 rows = cur.fetchall()
                 return [row[0] for row in rows]
@@ -52,7 +53,7 @@ def retrieve(question: str, top_k: int = 5) -> List[str]:
 
 def answer_question(question: str) -> str:
     """Answer a question using retrieved context."""
-    chunks = retrieve(question)
+    chunks = retrieve(question, upload_id)
     context = "\n".join(chunks)
     llm = GoogleGenerativeAI(google_api_key=GEMINI_API_KEY)
     prompt = (

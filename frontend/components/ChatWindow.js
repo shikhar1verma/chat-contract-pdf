@@ -6,13 +6,17 @@ export default function ChatWindow() {
 
   const sendQuestion = async () => {
     if (!input) return;
+    const uploadId = localStorage.getItem('upload_id');
+    if (!uploadId) {
+      alert('Please upload a PDF first'); return;
+    }
     const question = input;
     setMessages([...messages, { from: 'user', text: question }]);
     setInput('');
     const res = await fetch('http://localhost:8000/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question }),
+      body: JSON.stringify({ question, upload_id: uploadId }),
     });
     const data = await res.json();
     setMessages((m) => [...m, { from: 'bot', text: data.answer }]);

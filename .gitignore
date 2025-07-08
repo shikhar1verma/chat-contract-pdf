@@ -33,7 +33,7 @@ ENV/
 .env.development.local
 .env.test.local
 .env.production.local
-/backend/.env
+**.env
 
 # Node.js
 node_modules/
@@ -63,7 +63,6 @@ yarn-error.log*
 
 # Database
 *.sqlite3
-*.sql
 
 # Python byte-compiled / optimized / DLL files
 *.py[cod]
@@ -129,3 +128,10 @@ data/
 *.swp
 *.swo
 *~
+
+dump_code.py
+project_code_dump.txt
+
+# for next js
+*.next/
+*package-lock.json

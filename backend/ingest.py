@@ -1,13 +1,13 @@
 """PDF ingestion module for contract search."""
 
-import logging
-import os
+import logging, os, uuid
 from typing import List
 
-import psycopg2
+import psycopg
+from psycopg import Connection
 from dotenv import load_dotenv
-from langchain.document_loaders import PyPDFLoader
-from langchain.embeddings import GoogleGenerativeAIEmbeddings
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from pgvector.psycopg import register_vector
 
@@ -20,16 +20,16 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(message)s")
 
 
-def _get_connection() -> psycopg2.extensions.connection:
+def _get_connection() -> Connection:
     """Create and return a new PostgreSQL connection."""
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL is not set in environment variables")
-    conn = psycopg2.connect(DATABASE_URL)
+    conn = psycopg.connect(DATABASE_URL)
     register_vector(conn)
     return conn
 
 
-def ingest_file(file_path: str, filename: str) -> None:
+def ingest_file(file_path, filename, upload_id) -> None:
     """Ingest a PDF file into the PGVector-enabled PostgreSQL database.
 
     Args:
@@ -68,13 +68,18 @@ def ingest_file(file_path: str, filename: str) -> None:
         conn = _get_connection()
         with conn:
             with conn.cursor() as cur:
+                # write parent row once
+                cur.execute(
+                    "INSERT INTO uploads (upload_id, filename) VALUES (%s, %s)",
+                    (upload_id, filename),
+                )
                 for idx, (text, vector) in enumerate(zip(texts, vectors), start=1):
                     cur.execute(
                         """
-                        INSERT INTO documents (filename, chunk_text, chunk_embedding)
+                        INSERT INTO documents (upload_id, chunk_text, chunk_embedding)
                         VALUES (%s, %s, %s)
                         """,
-                        (filename, text, vector),
+                        (upload_id, text, vector),
                     )
                     logging.info("Inserted chunk %d/%d", idx, len(texts))
     except Exception as exc:

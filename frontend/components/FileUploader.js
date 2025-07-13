@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { postIngest } from '@/lib/api';
 
 export default function FileUploader() {
   const [uploading, setUploading] = useState(false);
@@ -9,19 +10,23 @@ export default function FileUploader() {
     const formData = new FormData();
     formData.append('file', file);
     setUploading(true);
-    await fetch('http://localhost:8000/ingest', {
-      method: 'POST',
-      body: formData,
-    });
+    const res = await postIngest(formData);
     const data = await res.json();
     localStorage.setItem('upload_id', data.upload_id);
     setUploading(false);
   };
 
   return (
-    <div>
-      <input type="file" accept="application/pdf" onChange={handleChange} />
-      {uploading && <p>Uploading...</p>}
-    </div>
+    <label className="flex flex-col items-center justify-center w-full h-40 cursor-pointer border-2 border-dashed border-gray-300 rounded-xl hover:border-primary/60 transition">
+      <input
+        type="file"
+        accept="application/pdf"
+        onChange={handleChange}
+        className="hidden"
+      />
+      <span className="text-gray-500">
+        {uploading ? 'Uploading…' : 'Click or drag a PDF here'}
+      </span>
+    </label>
   );
 }

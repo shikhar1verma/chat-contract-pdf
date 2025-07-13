@@ -28,9 +28,10 @@ def _get_connection() -> Connection:
 
 def retrieve(question: str, upload_id: str, top_k: int = 5) -> List[str]:
     """Retrieve top-k relevant text chunks from the database."""
-    embeddings = GoogleGenerativeAIEmbeddings(google_api_key=GEMINI_API_KEY)
+    embeddings = GoogleGenerativeAIEmbeddings(
+        model="models/text-embedding-004",
+        google_api_key=GEMINI_API_KEY)
     query_vec = embeddings.embed_query(question)
-
     conn = _get_connection()
     try:
         with conn:
@@ -40,7 +41,7 @@ def retrieve(question: str, upload_id: str, top_k: int = 5) -> List[str]:
                     SELECT chunk_text
                     FROM documents
                     WHERE upload_id = %s
-                    ORDER BY chunk_embedding <-> %s
+                    ORDER BY chunk_embedding <-> (%s::vector(768))
                     LIMIT %s
                     """,
                     (upload_id, query_vec, top_k),
@@ -51,11 +52,13 @@ def retrieve(question: str, upload_id: str, top_k: int = 5) -> List[str]:
         conn.close()
 
 
-def answer_question(question: str) -> str:
+def answer_question(question: str, upload_id: str) -> str:
     """Answer a question using retrieved context."""
     chunks = retrieve(question, upload_id)
     context = "\n".join(chunks)
-    llm = GoogleGenerativeAI(google_api_key=GEMINI_API_KEY)
+    llm = GoogleGenerativeAI(
+        model="gemini-2.0-flash-lite",
+        google_api_key=GEMINI_API_KEY)
     prompt = (
         "You are a contract-savvy assistant. Use ONLY the following excerpts to answer:\n"
         f"{context}\n\nQuestion: {question}"

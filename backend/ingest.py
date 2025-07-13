@@ -45,12 +45,16 @@ def ingest_file(file_path, filename, upload_id) -> None:
         logging.error("Failed to load PDF %s: %s", file_path, exc)
         raise
 
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=5000, chunk_overlap=400)
     chunks = splitter.split_documents(documents)
-    logging.info("Split into %d chunks", len(chunks))
+    logging.info("Chunks created: %d", len(chunks))
+    for i, chunk in enumerate(chunks):
+        logging.debug("Chunk %d length: %d chars", i+1, len(chunk.page_content))
 
     try:
-        embeddings = GoogleGenerativeAIEmbeddings(google_api_key=GEMINI_API_KEY)
+        embeddings = GoogleGenerativeAIEmbeddings(
+            model="models/text-embedding-004",
+            google_api_key=GEMINI_API_KEY)
     except Exception as exc:
         logging.error("Failed to initialize embeddings: %s", exc)
         raise

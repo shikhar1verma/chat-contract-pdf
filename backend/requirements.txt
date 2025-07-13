@@ -9,3 +9,5 @@ psycopg[binary]==3.1.18
 python-dotenv==1.0.1
 pypdf==4.2.0
 python-multipart==0.0.6
+slowapi==0.1.9
+secure==1.0.1

@@ -1,6 +1,6 @@
 """PDF ingestion module for contract search."""
 
-import logging, os, uuid
+import logging, os, uuid, re
 from typing import List
 
 import psycopg
@@ -16,9 +16,18 @@ load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+_CONTROL_CHARS_RE = re.compile(
+    r"[\x00-\x08\x0B\x0C\x0E-\x1F]"   # leave 09 (TAB), 0A (LF), 0D (CR)
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(message)s")
 
+def _sanitize(text: str) -> str:
+    """
+    Remove characters that cannot be stored in a PostgreSQL TEXT field.
+    Right now we just strip the NUL byte and control characters.
+    """
+    return _CONTROL_CHARS_RE.sub("", text)
 
 def _get_connection() -> Connection:
     """Create and return a new PostgreSQL connection."""
@@ -59,7 +68,7 @@ def ingest_file(file_path, filename, upload_id) -> None:
         logging.error("Failed to initialize embeddings: %s", exc)
         raise
 
-    texts: List[str] = [doc.page_content for doc in chunks]
+    texts: List[str] = [_sanitize(doc.page_content) for doc in chunks]
     logging.info("Embedding text chunks...")
     try:
         vectors = embeddings.embed_documents(texts)

@@ -1,6 +1,6 @@
-# Chat with Your Contract PDF
+# Chat with Your Document
 
-This project demonstrates a simple RAG application that lets users upload a contract PDF and chat with it using a language model.
+This project demonstrates a simple RAG application with vector database that lets users upload a document and chat with it using a language model.
 
 ## Local Development
 

@@ -1,6 +1,9 @@
 version: '3.9'
 services:
   db:
+    build:
+      context: .
+      dockerfile: db.Dockerfile
     image: postgres:15
     restart: always
     environment:
@@ -9,8 +12,9 @@ services:
       POSTGRES_DB: contractdb
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
-      - "5432:5432"
+      - "5433:5432"
   web:
     build: .
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload

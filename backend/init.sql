@@ -3,6 +3,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 CREATE TABLE uploads (
     upload_id  UUID PRIMARY KEY,
     filename   TEXT NOT NULL,
+    progress   TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

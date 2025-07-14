@@ -1,6 +1,6 @@
-"""PDF ingestion module for contract search."""
+"""PDF ingestion + progress helpers for Document-AI Chat."""
 
-import logging, os, uuid, re
+import logging, os, re, uuid, tempfile, shutil
 from typing import List
 
 import psycopg
@@ -11,97 +11,110 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from pgvector.psycopg import register_vector
 
-# Load environment variables from .env file
 load_dotenv()
-
 DATABASE_URL = os.getenv("DATABASE_URL")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-_CONTROL_CHARS_RE = re.compile(
-    r"[\x00-\x08\x0B\x0C\x0E-\x1F]"   # leave 09 (TAB), 0A (LF), 0D (CR)
-)
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(message)s")
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")  # keep TAB/LF/CR
+
 
 def _sanitize(text: str) -> str:
-    """
-    Remove characters that cannot be stored in a PostgreSQL TEXT field.
-    Right now we just strip the NUL byte and control characters.
-    """
+    """Strip control chars that Postgres TEXT cannot store."""
     return _CONTROL_CHARS_RE.sub("", text)
 
+
 def _get_connection() -> Connection:
-    """Create and return a new PostgreSQL connection."""
     if not DATABASE_URL:
-        raise RuntimeError("DATABASE_URL is not set in environment variables")
+        raise RuntimeError("DATABASE_URL is not set")
     conn = psycopg.connect(DATABASE_URL)
     register_vector(conn)
     return conn
 
 
-def ingest_file(file_path, filename, upload_id) -> None:
-    """Ingest a PDF file into the PGVector-enabled PostgreSQL database.
-
-    Args:
-        file_path: Path to the PDF file on disk.
-        filename: Original filename for reference in the database.
-    """
-
-    logging.info("Loading PDF: %s", file_path)
+def create_upload(upload_id: str, filename: str) -> None:
+    """Insert placeholder row so UI can start polling."""
+    conn = _get_connection()
     try:
-        loader = PyPDFLoader(file_path)
-        documents = loader.load()
-    except Exception as exc:
-        logging.error("Failed to load PDF %s: %s", file_path, exc)
-        raise
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO uploads (upload_id, filename) VALUES (%s, %s)",
+                (upload_id, filename),
+            )
+    finally:
+        conn.close()
 
+
+def update_progress(upload_id: str, message: str) -> None:
+    """Overwrite progress string."""
+    conn = _get_connection()
+    try:
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE uploads SET progress = %s WHERE upload_id = %s",
+                (message, upload_id),
+            )
+    finally:
+        conn.close()
+
+def ingest_file(file_path: str, filename: str, upload_id: str) -> None:
+    """
+    Heavy-weight background task.
+    • Parses PDF  → splits chunks → embeds → stores vectors.
+    • Emits progress text at coarse milestones.
+    """
+    update_progress(upload_id, "Ingestion started")
+    logging.info("Loading PDF: %s", file_path)
+
+    # 1. Read PDF
+    update_progress(upload_id, "10% – parsing PDF")
+    loader = PyPDFLoader(file_path)
+    documents = loader.load()
+
+    # 2. Chunk
     splitter = RecursiveCharacterTextSplitter(chunk_size=5000, chunk_overlap=400)
     chunks = splitter.split_documents(documents)
     logging.info("Chunks created: %d", len(chunks))
-    for i, chunk in enumerate(chunks):
-        logging.debug("Chunk %d length: %d chars", i+1, len(chunk.page_content))
+    update_progress(upload_id, "40% – splitting into chunks")
 
-    try:
-        embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/text-embedding-004",
-            google_api_key=GEMINI_API_KEY)
-    except Exception as exc:
-        logging.error("Failed to initialize embeddings: %s", exc)
-        raise
-
+    # 3. Embeddings
+    embeddings = GoogleGenerativeAIEmbeddings(
+        model="models/text-embedding-004",
+        google_api_key=GEMINI_API_KEY,
+    )
     texts: List[str] = [_sanitize(doc.page_content) for doc in chunks]
-    logging.info("Embedding text chunks...")
-    try:
-        vectors = embeddings.embed_documents(texts)
-    except Exception as exc:
-        logging.error("Embedding failed: %s", exc)
-        raise
+    update_progress(upload_id, "60% – generating embeddings")
+    vectors = embeddings.embed_documents(texts)
 
+    # 4. Insert rows
     conn = None
+    total = len(texts)
     try:
         conn = _get_connection()
-        with conn:
-            with conn.cursor() as cur:
-                # write parent row once
+        with conn, conn.cursor() as cur:
+            for idx, (text, vector) in enumerate(zip(texts, vectors), start=1):
                 cur.execute(
-                    "INSERT INTO uploads (upload_id, filename) VALUES (%s, %s)",
-                    (upload_id, filename),
+                    """
+                    INSERT INTO documents (upload_id, chunk_text, chunk_embedding)
+                    VALUES (%s, %s, %s)
+                    """,
+                    (upload_id, text, vector),
                 )
-                for idx, (text, vector) in enumerate(zip(texts, vectors), start=1):
-                    cur.execute(
-                        """
-                        INSERT INTO documents (upload_id, chunk_text, chunk_embedding)
-                        VALUES (%s, %s, %s)
-                        """,
-                        (upload_id, text, vector),
-                    )
-                    logging.info("Inserted chunk %d/%d", idx, len(texts))
+                # 25 / 50 / 75 %
+                if idx in {int(total * 0.25), int(total * 0.50), int(total * 0.75)}:
+                    pct = 60 + int(idx / total * 30)
+                    update_progress(upload_id, f"{pct}% – indexing chunks")
     except Exception as exc:
-        logging.error("Database insertion failed: %s", exc)
-        if conn:
-            conn.rollback()
+        update_progress(upload_id, f"Error: {exc}")
         raise
     finally:
         if conn:
             conn.close()
+        # clean tmp
+        try:
+            os.remove(file_path)
+        except OSError:
+            pass
 
+    update_progress(upload_id, "100% – ingestion complete. Ready for chat ✔")
     logging.info("Ingestion complete for %s", filename)
